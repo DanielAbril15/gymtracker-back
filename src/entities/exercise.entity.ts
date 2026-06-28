@@ -13,7 +13,7 @@ export class Exercise {
   muscleGroup: string;
 
   @Column({ nullable: true })
-  imageUrl: string;
+  svgUrl: string;
 
   @CreateDateColumn()
   createdAt: Date;

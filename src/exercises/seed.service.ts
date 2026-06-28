@@ -52,19 +52,19 @@ export class SeedService implements OnApplicationBootstrap {
     this.logger.log('Database is empty. Seeding catalog exercises...');
 
     const exercisesSeedData = [
-      { name: 'Press de Banca',      muscleGroup: 'Pecho',    imageUrl: '/assets/exercises/bench-press.svg' },
-      { name: 'Press Inclinado',     muscleGroup: 'Pecho',    imageUrl: '/assets/exercises/incline-press.svg' },
-      { name: 'Dominadas',           muscleGroup: 'Espalda',  imageUrl: '/assets/exercises/pull-ups.svg' },
-      { name: 'Peso Muerto',         muscleGroup: 'Espalda',  imageUrl: '/assets/exercises/deadlift.svg' },
-      { name: 'Sentadilla',          muscleGroup: 'Piernas',  imageUrl: '/assets/exercises/squat.svg' },
-      { name: 'Zancadas',            muscleGroup: 'Piernas',  imageUrl: '/assets/exercises/lunges.svg' },
-      { name: 'Press Militar',       muscleGroup: 'Hombros',  imageUrl: '/assets/exercises/ohp.svg' },
-      { name: 'Elevaciones Laterales', muscleGroup: 'Hombros', imageUrl: '/assets/exercises/lateral-raises.svg' },
-      { name: 'Curl Bíceps',         muscleGroup: 'Brazos',   imageUrl: '/assets/exercises/bicep-curl.svg' },
-      { name: 'Fondos Tríceps',      muscleGroup: 'Brazos',   imageUrl: '/assets/exercises/dips.svg' },
-      { name: 'Plancha',             muscleGroup: 'Core',     imageUrl: '/assets/exercises/plank.svg' },
-      { name: 'Crunches',            muscleGroup: 'Core',     imageUrl: '/assets/exercises/crunches.svg' },
-      { name: 'Correr en Cinta',     muscleGroup: 'Cardio',   imageUrl: '/assets/exercises/treadmill.svg' },
+      { name: 'Press de Banca',      muscleGroup: 'Pecho',    svgUrl: '/assets/exercises/bench-press.svg' },
+      { name: 'Press Inclinado',     muscleGroup: 'Pecho',    svgUrl: '/assets/exercises/incline-press.svg' },
+      { name: 'Dominadas',           muscleGroup: 'Espalda',  svgUrl: '/assets/exercises/pull-ups.svg' },
+      { name: 'Peso Muerto',         muscleGroup: 'Espalda',  svgUrl: '/assets/exercises/deadlift.svg' },
+      { name: 'Sentadilla',          muscleGroup: 'Piernas',  svgUrl: '/assets/exercises/squat.svg' },
+      { name: 'Zancadas',            muscleGroup: 'Piernas',  svgUrl: '/assets/exercises/lunges.svg' },
+      { name: 'Press Militar',       muscleGroup: 'Hombros',  svgUrl: '/assets/exercises/ohp.svg' },
+      { name: 'Elevaciones Laterales', muscleGroup: 'Hombros', svgUrl: '/assets/exercises/lateral-raises.svg' },
+      { name: 'Curl Bíceps',         muscleGroup: 'Brazos',   svgUrl: '/assets/exercises/bicep-curl.svg' },
+      { name: 'Fondos Tríceps',      muscleGroup: 'Brazos',   svgUrl: '/assets/exercises/dips.svg' },
+      { name: 'Plancha',             muscleGroup: 'Core',     svgUrl: '/assets/exercises/plank.svg' },
+      { name: 'Crunches',            muscleGroup: 'Core',     svgUrl: '/assets/exercises/crunches.svg' },
+      { name: 'Correr en Cinta',     muscleGroup: 'Cardio',   svgUrl: '/assets/exercises/treadmill.svg' },
     ];
 
     const insertedExercises = await this.exerciseRepo.save(

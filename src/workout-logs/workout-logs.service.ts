@@ -57,6 +57,49 @@ export class WorkoutLogsService {
     return log;
   }
 
+  async findPaginated(userId: string, page: number, limit: number): Promise<any> {
+    const uId = Number(userId);
+    const skip = (page - 1) * limit;
+
+    const [logs, total] = await this.workoutLogRepo.findAndCount({
+      where: { userId: uId },
+      relations: ['exercises', 'exercises.exercise', 'exercises.sets'],
+      order: { date: 'DESC' },
+      skip,
+      take: limit,
+    });
+
+    const mappedLogs = logs.map((log) => ({
+      _id: log.id.toString(),
+      date: log.date,
+      user: log.userId.toString(),
+      exercises: log.exercises.map((entry) => ({
+        exercise: entry.exercise ? {
+          _id: entry.exercise.id.toString(),
+          name: entry.exercise.name,
+          muscleGroup: entry.exercise.muscleGroup,
+          svgUrl: entry.exercise.svgUrl,
+        } : entry.exerciseId.toString(),
+        sets: entry.sets.map((set) => ({
+          reps: set.reps,
+          weight: set.weight,
+          rpe: set.rpe,
+          volume: set.volume,
+        })),
+      })),
+      totalVolume: log.totalVolume,
+      createdAt: log.createdAt.toISOString(),
+      updatedAt: log.updatedAt.toISOString(),
+    }));
+
+    return {
+      logs: mappedLogs,
+      total,
+      page,
+      limit,
+    };
+  }
+
   async getDayLog(userId: string, date: string): Promise<any> {
     const uId = Number(userId);
     const log = await this.workoutLogRepo.findOne({
@@ -86,7 +129,7 @@ export class WorkoutLogsService {
           _id: entry.exercise.id.toString(),
           name: entry.exercise.name,
           muscleGroup: entry.exercise.muscleGroup,
-          imageUrl: entry.exercise.imageUrl,
+          svgUrl: entry.exercise.svgUrl,
         },
         sets: entry.sets.map((set) => ({
           _id: set.id.toString(),
@@ -240,7 +283,7 @@ export class WorkoutLogsService {
     return this.getDayLog(userId, date);
   }
 
-  async getLastPerformedSets(userId: string, exerciseId: string): Promise<any[]> {
+  async getLastPerformedSets(userId: string, exerciseId: string): Promise<any | null> {
     const qb = this.workoutLogRepo.createQueryBuilder('log')
       .leftJoinAndSelect('log.exercises', 'exercises')
       .leftJoinAndSelect('exercises.sets', 'sets')
@@ -251,11 +294,22 @@ export class WorkoutLogsService {
     const lastLog = await qb.getOne();
 
     if (!lastLog) {
-      return [];
+      return null;
     }
 
     const exEntry = lastLog.exercises.find((e) => e.exerciseId === Number(exerciseId));
-    return exEntry ? exEntry.sets : [];
+    if (!exEntry || exEntry.sets.length === 0) {
+      return null;
+    }
+
+    // Return the last (most recent) set as LastSetData
+    const lastSet = exEntry.sets[exEntry.sets.length - 1];
+    return {
+      reps: lastSet.reps,
+      weight: lastSet.weight,
+      rpe: lastSet.rpe ?? undefined,
+      isPR: false, // PR detection could be enhanced later
+    };
   }
 
   async upsertLog(userId: string, date: string, exercises: any[]): Promise<any> {

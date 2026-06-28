@@ -14,11 +14,22 @@ export class ExercisesService {
     return this.moduleRef.get(getRepositoryToken(Exercise), { strict: false });
   }
 
+  private mapExercise(ex: Exercise): any {
+    return {
+      _id: ex.id.toString(),
+      name: ex.name,
+      muscleGroup: ex.muscleGroup,
+      svgUrl: ex.svgUrl,
+    };
+  }
+
   async findAll(): Promise<any[]> {
-    return this.exerciseRepo.find({ order: { name: 'ASC' } });
+    const exercises = await this.exerciseRepo.find({ order: { name: 'ASC' } });
+    return exercises.map(ex => this.mapExercise(ex));
   }
 
   async findByMuscleGroup(group: string): Promise<any[]> {
-    return this.exerciseRepo.find({ where: { muscleGroup: group }, order: { name: 'ASC' } });
+    const exercises = await this.exerciseRepo.find({ where: { muscleGroup: group }, order: { name: 'ASC' } });
+    return exercises.map(ex => this.mapExercise(ex));
   }
 }

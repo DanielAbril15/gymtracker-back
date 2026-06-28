@@ -1,10 +1,10 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { WorkoutLogsService } from './workout-logs.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { User } from '../entities/user.entity';
 import { SaveSetDto } from './dto/save-set.dto';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Workout Logs')
 @ApiBearerAuth('JWT-auth')
@@ -12,6 +12,21 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 @Controller('workout-logs')
 export class WorkoutLogsController {
   constructor(private readonly workoutLogsService: WorkoutLogsService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Obtener historial de logs paginado' })
+  @ApiQuery({ name: 'page', required: false, description: 'Número de página (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Registros por página (default: 20)' })
+  @ApiResponse({ status: 200, description: 'Logs paginados obtenidos correctamente' })
+  async getLogsPaginated(
+    @CurrentUser() user: User,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const p = page ? parseInt(page, 10) : 1;
+    const l = limit ? parseInt(limit, 10) : 20;
+    return this.workoutLogsService.findPaginated(user.id.toString(), p, l);
+  }
 
   @Get('date/:date')
   @ApiOperation({ summary: 'Obtener el log de entrenamiento de un día específico' })

@@ -113,13 +113,28 @@ export class DashboardService {
 
     const personalRecords = Object.values(recordsMap)
       .sort((a, b) => b.weight - a.weight)
-      .slice(0, 3);
+      .slice(0, 3)
+      .map(pr => ({
+        muscleGroup: pr.muscleGroup,
+        exercise: pr.exerciseName,
+        maxWeight: pr.weight,
+      }));
+
+    // 5. Total sessions & average volume
+    const totalSessions = logsWithExercises.length;
+    const totalVolumeAll = logsWithExercises.reduce((sum, l) => sum + l.totalVolume, 0);
+    const avgSessionVolume = totalSessions > 0 ? Math.round(totalVolumeAll / totalSessions) : 0;
 
     return {
       today: todaySummary,
       streak,
-      weeklyVolume,
+      weeklyVolume: weeklyVolume.map(wv => ({
+        date: wv.date,
+        volume: wv.totalVolume,
+      })),
       personalRecords,
+      totalSessions,
+      avgSessionVolume,
     };
   }
 }

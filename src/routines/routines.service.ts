@@ -32,11 +32,14 @@ export class RoutinesService {
           where: { routineId: r.id },
         });
         return {
-          _id: r.id,
+          _id: r.id.toString(),
           name: r.name,
+          description: r.description,
           startDate: r.startDate,
           endDate: r.endDate,
           status: r.status,
+          user: r.userId.toString(),
+          createdAt: r.createdAt.toISOString(),
           sessionsCount: sessionCount,
         };
       }),
@@ -132,15 +135,15 @@ export class RoutinesService {
       throw new NotFoundException('Rutina no encontrada');
     }
 
-    const logs = await this.workoutLogRepo.find({
-      where: { userId: routine.userId, routineId: routine.id },
-      order: { date: 'DESC' },
-      relations: ['exercises', 'exercises.exercise', 'exercises.sets'],
-    });
-
     return {
-      routine,
-      logs,
+      _id: routine.id.toString(),
+      name: routine.name,
+      description: routine.description,
+      status: routine.status,
+      startDate: routine.startDate,
+      endDate: routine.endDate,
+      user: routine.userId.toString(),
+      createdAt: routine.createdAt.toISOString(),
     };
   }
 }

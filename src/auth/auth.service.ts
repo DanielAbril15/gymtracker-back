@@ -24,7 +24,7 @@ export class AuthService {
     return this.moduleRef.get(getRepositoryToken(User), { strict: false });
   }
 
-  async register(dto: RegisterDto): Promise<Omit<User, 'passwordHash'>> {
+  async register(dto: RegisterDto, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date } }> {
     const email = dto.email.toLowerCase();
     
     const existing = await this.userRepo.findOne({ where: { email } });
@@ -42,18 +42,41 @@ export class AuthService {
     });
 
     const saved = await this.userRepo.save(user);
+
+    // Auto-login after registration (same as login flow)
+    const sub = saved.id.toString();
+    const payload: JwtPayload = { sub, email: saved.email };
+
+    const accessToken = this.jwtService.sign(payload, {
+      secret: this.configService.get<string>('JWT_SECRET'),
+      expiresIn: (this.configService.get<string>('JWT_EXPIRES_IN') || '15m') as any,
+    });
+
+    const refreshToken = this.jwtService.sign(payload, {
+      secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+      expiresIn: (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d') as any,
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: this.configService.get<string>('NODE_ENV') === 'production',
+      sameSite: 'lax',
+      path: '/api/v1/auth',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
     return {
-      id: saved.id,
-      email: saved.email,
-      name: saved.name,
-      createdAt: saved.createdAt,
-      updatedAt: saved.updatedAt,
-      routines: saved.routines || [],
-      workoutLogs: saved.workoutLogs || [],
+      accessToken,
+      user: {
+        _id: saved.id.toString(),
+        email: saved.email,
+        name: saved.name,
+        createdAt: saved.createdAt,
+      },
     };
   }
 
-  async login(dto: LoginDto, res: Response): Promise<{ accessToken: string; user: { email: string; name: string } }> {
+  async login(dto: LoginDto, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date } }> {
     const email = dto.email.toLowerCase();
     const dbUser = await this.userRepo.findOne({ where: { email } });
 
@@ -93,13 +116,15 @@ export class AuthService {
     return {
       accessToken,
       user: {
+        _id: dbUser.id.toString(),
         email: dbUser.email,
         name: dbUser.name,
+        createdAt: dbUser.createdAt,
       },
     };
   }
 
-  async refresh(cookieToken: string, res: Response): Promise<{ accessToken: string }> {
+  async refresh(cookieToken: string, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date } }> {
     if (!cookieToken) {
       throw new UnauthorizedException('No hay token de refresco disponible');
     }
@@ -137,7 +162,15 @@ export class AuthService {
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
-      return { accessToken };
+      return {
+        accessToken,
+        user: {
+          _id: dbUser.id.toString(),
+          email: dbUser.email,
+          name: dbUser.name,
+          createdAt: dbUser.createdAt,
+        },
+      };
 
     } catch (error) {
       throw new UnauthorizedException('Token de refresco inválido o expirado');

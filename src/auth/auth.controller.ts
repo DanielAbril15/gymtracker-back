@@ -18,8 +18,11 @@ export class AuthController {
   @ApiResponse({ status: 201, description: 'Usuario registrado exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   @ApiResponse({ status: 409, description: 'El correo ya está registrado' })
-  async register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  async register(
+    @Body() dto: RegisterDto,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    return this.authService.register(dto, res);
   }
 
   @Post('login')
