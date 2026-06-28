@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { RoutinesService } from './routines.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -78,12 +78,25 @@ export class RoutinesController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Obtener detalles de una rutina específica e historial de sesiones' })
-  @ApiResponse({ status: 200, description: 'Detalle de la rutina obtenido' })
+  @ApiOperation({ summary: 'Obtener detalle de una rutina' })
+  @ApiResponse({ status: 200, description: 'Detalle de la rutina' })
+  @ApiResponse({ status: 404, description: 'Rutina no encontrada' })
   async getRoutineDetail(
     @CurrentUser() user: User,
     @Param('id') routineId: string,
   ) {
     return this.routinesService.getRoutineDetail(user.id.toString(), routineId);
+  }
+
+  @Put(':id/schedule')
+  @ApiOperation({ summary: 'Actualizar la configuración de días y ejercicios de una rutina' })
+  @ApiResponse({ status: 200, description: 'Horario actualizado exitosamente' })
+  @ApiResponse({ status: 404, description: 'Rutina no encontrada' })
+  async updateSchedule(
+    @CurrentUser() user: User,
+    @Param('id') routineId: string,
+    @Body('schedule') schedule: any,
+  ) {
+    return this.routinesService.updateSchedule(user.id.toString(), routineId, schedule);
   }
 }

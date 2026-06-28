@@ -38,6 +38,7 @@ export class RoutinesService {
           startDate: r.startDate,
           endDate: r.endDate,
           status: r.status,
+          schedule: r.schedule,
           user: r.userId.toString(),
           createdAt: r.createdAt.toISOString(),
           sessionsCount: sessionCount,
@@ -142,8 +143,24 @@ export class RoutinesService {
       status: routine.status,
       startDate: routine.startDate,
       endDate: routine.endDate,
+      schedule: routine.schedule,
       user: routine.userId.toString(),
       createdAt: routine.createdAt.toISOString(),
     };
+  }
+
+  async updateSchedule(userId: string, routineId: string, schedule: any): Promise<any> {
+    const routine = await this.routineRepo.findOne({
+      where: { id: Number(routineId), userId: Number(userId) },
+    });
+
+    if (!routine) {
+      throw new NotFoundException('Rutina no encontrada');
+    }
+
+    routine.schedule = schedule;
+    await this.routineRepo.save(routine);
+
+    return this.getRoutineDetail(userId, routineId);
   }
 }

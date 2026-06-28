@@ -34,4 +34,23 @@ export class ExportController {
     res.setHeader('Content-Length', buffer.length);
     res.end(buffer);
   }
+
+  @Get('ai-prompt')
+  @ApiOperation({ summary: 'Exportar prompt para IA en formato TXT' })
+  @ApiResponse({ status: 200, description: 'Archivo TXT descargado correctamente' })
+  @ApiResponse({ status: 404, description: 'Rutina no encontrada' })
+  async exportAIPrompt(
+    @CurrentUser() user: User,
+    @Res() res: express.Response,
+  ) {
+    const buffer = await this.exportService.generateAIPromptTXT(user.id.toString());
+    
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="GymTracker_AIPrompt_${Date.now()}.txt"`,
+    );
+    res.setHeader('Content-Length', buffer.length);
+    res.end(buffer);
+  }
 }

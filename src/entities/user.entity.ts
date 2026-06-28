@@ -16,6 +16,15 @@ export class User {
   @Column()
   name: string;
 
+  @Column({ nullable: true, type: 'float' })
+  weight: number;
+
+  @Column({ nullable: true, type: 'int' })
+  height: number;
+
+  @Column({ nullable: true, type: 'int' })
+  age: number;
+
   @CreateDateColumn()
   createdAt: Date;
 

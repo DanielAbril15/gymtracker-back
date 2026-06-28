@@ -24,7 +24,7 @@ export class AuthService {
     return this.moduleRef.get(getRepositoryToken(User), { strict: false });
   }
 
-  async register(dto: RegisterDto, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date } }> {
+  async register(dto: RegisterDto, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date; weight?: number; height?: number; age?: number } }> {
     const email = dto.email.toLowerCase();
     
     const existing = await this.userRepo.findOne({ where: { email } });
@@ -72,11 +72,14 @@ export class AuthService {
         email: saved.email,
         name: saved.name,
         createdAt: saved.createdAt,
+        weight: saved.weight,
+        height: saved.height,
+        age: saved.age,
       },
     };
   }
 
-  async login(dto: LoginDto, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date } }> {
+  async login(dto: LoginDto, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date; weight?: number; height?: number; age?: number } }> {
     const email = dto.email.toLowerCase();
     const dbUser = await this.userRepo.findOne({ where: { email } });
 
@@ -120,11 +123,14 @@ export class AuthService {
         email: dbUser.email,
         name: dbUser.name,
         createdAt: dbUser.createdAt,
+        weight: dbUser.weight,
+        height: dbUser.height,
+        age: dbUser.age,
       },
     };
   }
 
-  async refresh(cookieToken: string, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date } }> {
+  async refresh(cookieToken: string, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date; weight?: number; height?: number; age?: number } }> {
     if (!cookieToken) {
       throw new UnauthorizedException('No hay token de refresco disponible');
     }
@@ -169,12 +175,36 @@ export class AuthService {
           email: dbUser.email,
           name: dbUser.name,
           createdAt: dbUser.createdAt,
+          weight: dbUser.weight,
+          height: dbUser.height,
+          age: dbUser.age,
         },
       };
 
     } catch (error) {
       throw new UnauthorizedException('Token de refresco inválido o expirado');
     }
+  }
+
+  async updateProfile(userId: string, data: { weight?: number; height?: number; age?: number }): Promise<any> {
+    const user = await this.userRepo.findOne({ where: { id: Number(userId) } });
+    if (!user) throw new UnauthorizedException('Usuario no encontrado');
+
+    if (data.weight !== undefined) user.weight = data.weight;
+    if (data.height !== undefined) user.height = data.height;
+    if (data.age !== undefined) user.age = data.age;
+
+    await this.userRepo.save(user);
+
+    return {
+      _id: user.id.toString(),
+      email: user.email,
+      name: user.name,
+      createdAt: user.createdAt,
+      weight: user.weight,
+      height: user.height,
+      age: user.age,
+    };
   }
 
   logout(res: Response): void {

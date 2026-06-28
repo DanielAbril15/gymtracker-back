@@ -490,7 +490,10 @@ A continuación están mis métricas del período ${formatDate(routine.startDate
 Por favor analiza mi progresión y recomienda si debo aumentar peso, repeticiones o intensidad (RPE).
 
 PERFIL DEL ATLETA:
-- Rutina: ${routine.name}
+- Edad: ${user?.age ? `${user.age} años` : 'No especificada'}
+- Peso: ${user?.weight ? `${user.weight} kg` : 'No especificado'}
+- Altura: ${user?.height ? `${user.height} cm` : 'No especificada'}
+- Rutina actual: ${routine.name} (${routine.description || 'Sin descripción'})
 - Período analizado: ${totalWeeksCount} semanas
 - Frecuencia promedio: ${weeklyFreq} días/semana
 
@@ -513,5 +516,118 @@ SOLICITUD DE ANÁLISIS PARA LA IA:
     sheetParaIa.getColumn('A').width = 110;
 
     return workbook.xlsx.writeBuffer() as unknown as Promise<Buffer>;
+  }
+
+  async generateAIPromptTXT(userId: string): Promise<Buffer> {
+    let routine: Routine | null = null;
+    const uId = Number(userId);
+
+    const activeRoutine = await this.routineRepo.findOne({
+      where: { userId: uId, status: 'active' },
+      order: { id: 'DESC' },
+    });
+    const lastRoutine = activeRoutine || await this.routineRepo.findOne({
+      where: { userId: uId },
+      order: { id: 'DESC' },
+    });
+
+    if (!lastRoutine) {
+      throw new NotFoundException('No se encontraron rutinas para exportar');
+    }
+    const rId = lastRoutine.id;
+    routine = await this.routineRepo.findOne({ where: { id: rId, userId: uId } });
+
+    if (!routine) throw new NotFoundException('Rutina no encontrada');
+
+    const logs = await this.workoutLogRepo.find({
+      where: { userId: uId, routineId: rId },
+      order: { date: 'ASC' },
+      relations: ['exercises', 'exercises.exercise', 'exercises.sets'],
+    });
+
+    const user = await this.userRepo.findOne({ where: { id: uId } });
+
+    const totalSessions = logs.length;
+    const activeExercises: any[] = [];
+    logs.forEach(l => {
+      l.exercises.forEach((exEntry: any) => {
+        const ex = exEntry.exercise;
+        if (!ex) return;
+        if (!activeExercises.some(e => e.name === ex.name)) {
+          activeExercises.push(ex);
+        }
+      });
+    });
+
+    const startDateMs = new Date(routine.startDate || new Date()).getTime();
+    const activeWeeks = new Set<number>();
+    logs.forEach(log => {
+      const logDate = new Date(log.date);
+      const diffDays = Math.floor((logDate.getTime() - startDateMs) / (24 * 60 * 60 * 1000));
+      activeWeeks.add(Math.floor(diffDays / 7) + 1);
+    });
+
+    const totalWeeksCount = activeWeeks.size;
+    const weeklyFreq = totalWeeksCount > 0 ? (totalSessions / totalWeeksCount).toFixed(1) : '0';
+
+    const formatDate = (d: Date | string | null | undefined): string => {
+      if (!d) return 'Activa';
+      const dateObj = typeof d === 'string' ? new Date(d) : d;
+      return dateObj.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+    };
+
+    let progressionTableMarkdown = '| Ejercicio | Grupo Muscular | Sesiones | Peso Máx | Reps Máx (con peso máx) | Volumen Total |\n';
+    progressionTableMarkdown += '| --- | --- | --- | --- | --- | --- |\n';
+
+    activeExercises.forEach(exercise => {
+      const targetExerciseIdStr = exercise.id.toString();
+
+      const exLogs = logs.filter(l => l.exercises.some((e: any) => {
+        return e.exerciseId.toString() === targetExerciseIdStr;
+      }));
+
+      let maxWeight = 0;
+      let maxReps = 0;
+      let totalExVolume = 0;
+
+      exLogs.forEach(log => {
+        const exEntry = log.exercises.find((e: any) => e.exerciseId.toString() === targetExerciseIdStr);
+        if (!exEntry) return;
+        exEntry.sets.forEach((set: any) => {
+          totalExVolume += set.volume;
+          if (set.weight > maxWeight) {
+            maxWeight = set.weight;
+            maxReps = set.reps;
+          }
+        });
+      });
+
+      progressionTableMarkdown += `| ${exercise.name} | ${exercise.muscleGroup} | ${exLogs.length} | ${maxWeight} kg | ${maxReps} reps | ${totalExVolume} kg |\n`;
+    });
+
+    const promptText = `
+CONTEXTO: Soy un atleta realizando seguimiento de mi entrenamiento.
+A continuación están mis métricas del período ${formatDate(routine.startDate)} al ${formatDate(routine.endDate || new Date())}.
+Por favor analiza mi progresión y recomienda si debo aumentar peso, repeticiones o intensidad (RPE).
+
+PERFIL DEL ATLETA:
+- Edad: ${user?.age ? `${user.age} años` : 'No especificada'}
+- Peso: ${user?.weight ? `${user.weight} kg` : 'No especificado'}
+- Altura: ${user?.height ? `${user.height} cm` : 'No especificada'}
+- Rutina actual: ${routine.name} (${routine.description || 'Sin descripción'})
+- Período analizado: ${totalWeeksCount} semanas
+- Frecuencia promedio: ${weeklyFreq} días/semana
+
+DATOS DE PROGRESIÓN DE EJERCICIOS:
+${progressionTableMarkdown}
+
+SOLICITUD DE ANÁLISIS:
+1. ¿En qué ejercicios estoy estancado? (sin progresión significativa en peso o volumen en las últimas semanas)
+2. ¿En cuáles debo aumentar peso? (criterio: completar todas las series planificadas con un RPE bajo)
+3. ¿Hay algún desequilibrio muscular visible en la distribución del volumen?
+4. Recomendaciones concretas y estructuradas para el próximo mes de entrenamiento.
+`;
+
+    return Buffer.from(promptText, 'utf-8');
   }
 }

@@ -29,6 +29,9 @@ export class Routine {
   @Column({ default: 'active' })
   status: string; // active, completed, archived
 
+  @Column({ type: 'json', nullable: true })
+  schedule: any; // { days: { name: string, exercises: { exerciseId: string, sets: number, reps: string }[] }[] }
+
   @CreateDateColumn()
   createdAt: Date;
 

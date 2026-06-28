@@ -1,7 +1,8 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import * as express from 'express';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser } from './current-user.decorator';
@@ -57,6 +58,19 @@ export class AuthController {
   async logout(@Res({ passthrough: true }) res: express.Response) {
     this.authService.logout(res);
     return { message: 'Sesión cerrada exitosamente' };
+  }
+
+  @ApiBearerAuth('JWT-auth')
+  @UseGuards(JwtAuthGuard)
+  @Put('profile')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Actualizar métricas del perfil (peso, altura, edad)' })
+  @ApiResponse({ status: 200, description: 'Perfil actualizado' })
+  async updateProfile(
+    @CurrentUser() user: User,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.authService.updateProfile(user.id.toString(), dto);
   }
 
   @Get('me')
