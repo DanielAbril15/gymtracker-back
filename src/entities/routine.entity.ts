@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { User } from './user.entity';
 import { WorkoutLog } from './workout-log.entity';
+import { Macrocycle } from './macrocycle.entity';
 
 @Entity('routines')
 export class Routine {
@@ -13,6 +14,13 @@ export class Routine {
   @ManyToOne(() => User, (user) => user.routines, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
   user: User;
+
+  @Column({ nullable: true })
+  macrocycleId: number | null;
+
+  @ManyToOne(() => Macrocycle, (macro) => macro.routines, { onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'macrocycleId' })
+  macrocycle: Macrocycle;
 
   @Column()
   name: string;

@@ -25,6 +25,12 @@ export class User {
   @Column({ nullable: true, type: 'int' })
   age: number;
 
+  @Column({ nullable: true, type: 'varchar', length: 20 })
+  gender: string; // "male" | "female" | "neutral"
+
+  @Column({ nullable: true, type: 'varchar', length: 20 })
+  experienceLevel: string; // "beginner" | "intermediate" | "advanced"
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -9,7 +9,8 @@ import { RoutinesModule } from './routines/routines.module';
 import { WorkoutLogsModule } from './workout-logs/workout-logs.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ExportModule } from './export/export.module';
-import { User, Exercise, Routine, WorkoutLog, LoggedExercise, WorkoutSet } from './entities';
+import { CoachModule } from './coach/coach.module';
+import { User, Exercise, Routine, WorkoutLog, LoggedExercise, WorkoutSet, Season, Macrocycle } from './entities';
 
 @Module({
   imports: [
@@ -25,7 +26,7 @@ import { User, Exercise, Routine, WorkoutLog, LoggedExercise, WorkoutSet } from 
         username: configService.get<string>('DB_USERNAME') || 'gymuser',
         password: configService.get<string>('DB_PASSWORD') || 'root',
         database: configService.get<string>('DB_DATABASE') || 'gymtracker',
-        entities: [User, Exercise, Routine, WorkoutLog, LoggedExercise, WorkoutSet],
+        entities: [User, Exercise, Routine, WorkoutLog, LoggedExercise, WorkoutSet, Season, Macrocycle],
         synchronize: true, // For development sync
       }),
       inject: [ConfigService],
@@ -46,6 +47,7 @@ import { User, Exercise, Routine, WorkoutLog, LoggedExercise, WorkoutSet } from 
     WorkoutLogsModule,
     DashboardModule,
     ExportModule,
+    CoachModule,
   ],
   controllers: [AppController],
   providers: [],
