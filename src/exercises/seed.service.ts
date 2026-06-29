@@ -43,6 +43,23 @@ export class SeedService implements OnApplicationBootstrap {
   async seed() {
     this.logger.log('Checking if database needs seeding...');
 
+    // Run clean up for any existing records with wrong/broken svgs
+    try {
+      await this.exerciseRepo.createQueryBuilder()
+        .update(Exercise)
+        .set({ svgUrl: () => "REPLACE(svgUrl, '/show/', '/vectors/')" })
+        .where("svgUrl LIKE '%svgrepo.com/show/%'")
+        .execute();
+      
+      await this.exerciseRepo.createQueryBuilder()
+        .update(Exercise)
+        .set({ svgUrl: '/assets/exercises/default.svg' })
+        .where("svgUrl = '/assets/icons/exercises/default.svg'")
+        .execute();
+    } catch (e) {
+      this.logger.error('Error running svgUrl clean up query:', e);
+    }
+
     const exerciseCount = await this.exerciseRepo.count();
     if (exerciseCount > 0) {
       this.logger.log('Database already seeded. Skipping.');

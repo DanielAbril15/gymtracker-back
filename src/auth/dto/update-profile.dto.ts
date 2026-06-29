@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsOptional, Min } from 'class-validator';
+import { IsNumber, IsOptional, Min, IsBoolean, IsString } from 'class-validator';
 
 export class UpdateProfileDto {
   @ApiPropertyOptional({ description: 'Peso corporal en kg' })
@@ -19,4 +19,20 @@ export class UpdateProfileDto {
   @IsNumber()
   @Min(10)
   age?: number;
+
+  @ApiPropertyOptional({ description: 'Opt-in para el ciclo menstrual' })
+  @IsOptional()
+  @IsBoolean()
+  menstrualCycleOptIn?: boolean;
+
+  @ApiPropertyOptional({ description: 'Fecha de inicio del último periodo (YYYY-MM-DD)' })
+  @IsOptional()
+  @IsString()
+  lastPeriodStartDate?: string;
+
+  @ApiPropertyOptional({ description: 'Duración promedio del ciclo menstrual' })
+  @IsOptional()
+  @IsNumber()
+  @Min(15)
+  averageCycleLength?: number;
 }

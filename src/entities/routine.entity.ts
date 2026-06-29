@@ -40,6 +40,9 @@ export class Routine {
   @Column({ type: 'json', nullable: true })
   schedule: any; // { days: { name: string, exercises: { exerciseId: string, sets: number, reps: string }[] }[] }
 
+  @Column({ type: 'json', nullable: true })
+  comparisonReport: any;
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -31,6 +31,15 @@ export class User {
   @Column({ nullable: true, type: 'varchar', length: 20 })
   experienceLevel: string; // "beginner" | "intermediate" | "advanced"
 
+  @Column({ default: false })
+  menstrualCycleOptIn: boolean;
+
+  @Column({ nullable: true, type: 'varchar', length: 10 })
+  lastPeriodStartDate: string | null;
+
+  @Column({ nullable: true, type: 'int', default: 28 })
+  averageCycleLength: number | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

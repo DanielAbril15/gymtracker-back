@@ -58,6 +58,9 @@ export class CoachService {
     const uId = Number(userId);
     const advice: any[] = [];
 
+    const user = await this.userRepo.findOne({ where: { id: uId } });
+    if (!user) return advice;
+
     // Find active routine
     const activeRoutine = await this.routineRepo.findOne({
       where: { userId: uId, status: 'active' },
@@ -72,18 +75,78 @@ export class CoachService {
       return advice;
     }
 
-    // Rule 1: Deload check (if routine is > 6 weeks old)
+    // Rule 1: Deload check (if routine is in its final week)
     if (activeRoutine.startDate) {
       const start = new Date(activeRoutine.startDate).getTime();
       const now = new Date().getTime();
       const diffWeeks = (now - start) / (1000 * 60 * 60 * 24 * 7);
       
-      if (diffWeeks >= 6) {
+      const level = user.experienceLevel || 'intermediate';
+      const deloadThreshold = level === 'beginner' ? 4 : 6;
+
+      if (diffWeeks >= deloadThreshold && diffWeeks < deloadThreshold + 1) {
         advice.push({
           type: 'warning',
-          title: 'Considera un Deload',
-          message: 'Tu rutina activa lleva más de 6 semanas. Para reducir la fatiga acumulada, considera hacer una semana de descarga (reduciendo volumen un 40-50%) antes de empezar el siguiente mesociclo.',
+          title: 'Semana de Descarga (Deload) Activa',
+          message: '¡Estás en la última semana de tu mesociclo! Esta debe ser tu semana de descarga (Deload). Te sugerimos reducir las series efectivas a la mitad (~40-60%) y entrenar a un RIR de 3-4 (baja intensidad) para disipar la fatiga acumulada antes de avanzar.',
         });
+      } else if (diffWeeks >= deloadThreshold + 1) {
+        advice.push({
+          type: 'warning',
+          title: 'Mesociclo Vencido',
+          message: 'Tu mesociclo actual ya superó su duración planificada. Te recomendamos usar el botón "Avanzar Mesociclo" para comenzar un nuevo bloque.',
+        });
+      }
+    }
+
+    // Rule 1b: Inactivity Readaptation check
+    try {
+      const lastLog = await this.workoutLogRepo.findOne({
+        where: { userId: uId },
+        order: { date: 'DESC' },
+      });
+
+      if (lastLog) {
+        const lastWorkoutDate = new Date(lastLog.date + 'T00:00:00').getTime();
+        const now = new Date().getTime();
+        const diffDays = Math.floor((now - lastWorkoutDate) / (1000 * 60 * 60 * 24));
+        
+        if (diffDays >= 7 && diffDays < 14) {
+          advice.push({
+            type: 'info',
+            title: 'Retorno al Entrenamiento: Re-entrada',
+            message: `Han pasado ${diffDays} días desde tu último entrenamiento. Te sugerimos realizar una sesión de re-entrada: reduce el volumen un 20% en tus ejercicios y mantén un RIR de 2-3 para evitar dolor muscular extremo (agujetas).`,
+          });
+        } else if (diffDays >= 14) {
+          advice.push({
+            type: 'warning',
+            title: 'Retorno al Entrenamiento: Readaptación',
+            message: `Han pasado ${diffDays} días sin entrenar. Es altamente recomendable realizar una **semana de readaptación**: reduce el volumen al 50%, entrena liviano (RIR 3-4) y evita llegar al fallo muscular durante esta primera semana para prevenir lesiones y recuperar el ritmo de forma segura.`,
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Error calculating readaptation advice:', e);
+    }
+
+    // Rule 2: Menstrual Cycle Check (Late Luteal warning)
+    if (user.gender === 'female' && user.menstrualCycleOptIn && user.lastPeriodStartDate) {
+      const start = new Date(user.lastPeriodStartDate + 'T00:00:00').getTime();
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const diffDays = Math.floor((today - start) / (1000 * 60 * 60 * 24));
+      if (diffDays >= 0) {
+        const cycleLength = user.averageCycleLength || 28;
+        const currentDayOfCycle = (diffDays % cycleLength) + 1;
+        
+        // Late luteal phase: last 7 days of the cycle
+        if (currentDayOfCycle > cycleLength - 7) {
+          advice.push({
+            type: 'info',
+            title: 'Fase Lútea Tardía Detectada',
+            message: `Te encuentras en el día ${currentDayOfCycle} de tu ciclo. En la fase lútea tardía es común experimentar mayor fatiga o retención. Te sugerimos considerar un ajuste consultivo: puedes reducir 1 serie por ejercicio hoy o reducir la intensidad (mantener un RIR de 2-3 en vez de llegar al fallo).`,
+          });
+        }
       }
     }
 
@@ -99,40 +162,78 @@ export class CoachService {
 
     const recentLogs = logs.filter(l => new Date(l.date) >= twoWeeksAgo);
 
-    // Rule 2: Volume Check (last 7 days)
+    // Rule 3: Volume Check (last 7 days)
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     const weeklyLogs = logs.filter(l => new Date(l.date) >= oneWeekAgo);
     
     const volumePerGroup: Record<string, number> = {};
+    const daysTrainedPerGroup: Record<string, Set<string>> = {};
+
     weeklyLogs.forEach(log => {
+      const dateStr = new Date(log.date).toISOString().split('T')[0];
       log.exercises.forEach(ex => {
         if (ex.exercise) {
           const group = ex.exercise.muscleGroup;
           volumePerGroup[group] = (volumePerGroup[group] || 0) + ex.sets.length;
+          
+          if (!daysTrainedPerGroup[group]) {
+            daysTrainedPerGroup[group] = new Set();
+          }
+          daysTrainedPerGroup[group].add(dateStr);
         }
       });
     });
 
-    let lowVolumeGroups: string[] = [];
-    let highVolumeGroups: string[] = [];
+    const lowVolumeMessages: string[] = [];
+    const highVolumeMessages: string[] = [];
+    let lowFrequencyGroups: string[] = [];
+
+    const gender = user.gender || 'neutral';
+    const level = user.experienceLevel || 'intermediate';
+
     Object.keys(volumePerGroup).forEach(group => {
-      if (volumePerGroup[group] < 8) lowVolumeGroups.push(group);
-      if (volumePerGroup[group] > 22) highVolumeGroups.push(group);
+      const range = this.getWeeklyVolumeRange(group, gender);
+      let minSets = range.min;
+      let maxSets = range.max;
+      
+      if (level === 'beginner') {
+        minSets = Math.max(4, Math.round(minSets * 0.8));
+      }
+
+      const actualSets = volumePerGroup[group];
+
+      if (actualSets < minSets) {
+        lowVolumeMessages.push(`${group} (${actualSets} series vs. min. ${minSets})`);
+      } else if (actualSets > maxSets + 2) {
+        highVolumeMessages.push(`${group} (${actualSets} series vs. máx. ${maxSets})`);
+      }
+      
+      if (daysTrainedPerGroup[group].size === 1) {
+        lowFrequencyGroups.push(group);
+      }
     });
 
-    if (lowVolumeGroups.length > 0) {
+    if (lowFrequencyGroups.length > 0) {
+      advice.push({
+        type: 'info',
+        title: 'Frecuencia Baja Detectada',
+        message: `Esta semana entrenaste ${lowFrequencyGroups.join(', ')} solo 1 vez. La ciencia (Frecuencia 2) sugiere estimular cada músculo al menos 2 veces por semana para óptima hipertrofia.`,
+      });
+    }
+
+    if (lowVolumeMessages.length > 0) {
       advice.push({
         type: 'info',
         title: 'Volumen Bajo Detectado',
-        message: `Tus series semanales para: ${lowVolumeGroups.join(', ')} están por debajo del rango sugerido (10-20). Considera añadir 1-2 series más si tu objetivo es maximizar hipertrofia.`,
+        message: `Tus series semanales están por debajo del rango sugerido para tu perfil en: ${lowVolumeMessages.join(', ')}. Considera añadir series para optimizar tu desarrollo.`,
       });
     }
-    if (highVolumeGroups.length > 0) {
+    if (highVolumeMessages.length > 0) {
       advice.push({
         type: 'warning',
         title: 'Posible Sobreentrenamiento',
-        message: `Tus series semanales para: ${highVolumeGroups.join(', ')} superan el límite superior (20+ series). Si sientes dolor persistente o estancamiento, reduce el volumen.`,
+        message: `Tus series semanales superan el límite sugerido para tu perfil en: ${highVolumeMessages.join(', ')}. Si sientes fatiga persistente o estancamiento de cargas, reduce el volumen.`,
       });
     }
 
@@ -202,14 +303,20 @@ export class CoachService {
 
     // 3. Generate first Routine (Mesocycle)
     const routineEnd = new Date(today);
-    routineEnd.setDate(today.getDate() + 42); // 6 weeks
-    const schedule = await this.generateSchedule(dto.splitPreference, dto.useCalisthenics || false);
+    const durationDays = this.getRoutineDurationDays(dto.experienceLevel);
+    routineEnd.setDate(today.getDate() + durationDays);
+    const schedule = await this.generateSchedule(dto.splitPreference, dto.gender, dto.experienceLevel, dto.useCalisthenics || false);
+
+    // Disclaimer if gender differences applied
+    const extraDesc = dto.gender === 'female' || dto.gender === 'male' 
+      ? ` (Nota: Énfasis aplicado según tendencias estadísticas de género. Ajusta a tus prioridades).` 
+      : '';
 
     const routine = this.routineRepo.create({
       userId: uId,
       macrocycleId: macro1.id,
       name: `Mesociclo 1 - ${dto.splitPreference}`,
-      description: `Generado para nivel ${dto.experienceLevel}, objetivo: ${dto.goal}`,
+      description: `Generado para nivel ${dto.experienceLevel}, objetivo: ${dto.goal}${extraDesc}`,
       startDate: today.toISOString().split('T')[0],
       endDate: routineEnd.toISOString().split('T')[0],
       status: 'active',
@@ -231,7 +338,84 @@ export class CoachService {
 
     const { season, activeMacrocycle, activeRoutine } = current;
 
-    // 2. Mark active routine as completed
+    // 2. Calculate comparison report Plan-vs-Real
+    try {
+      const logs = await this.workoutLogRepo.find({
+        where: { userId: uId, routineId: activeRoutine.id },
+        relations: ['exercises', 'exercises.exercise', 'exercises.sets'],
+        order: { date: 'ASC' },
+      });
+
+      const loggedSessionsCount = logs.length;
+      const daysInSchedule = activeRoutine.schedule && Array.isArray(activeRoutine.schedule) ? activeRoutine.schedule.length : 3;
+      
+      const start = activeRoutine.startDate ? new Date(activeRoutine.startDate).getTime() : new Date().getTime();
+      const end = new Date().getTime();
+      const weeks = Math.max(1, Math.round((end - start) / (1000 * 60 * 60 * 24 * 7)));
+      const totalScheduled = weeks * daysInSchedule;
+      const adherence = totalScheduled > 0 ? Math.round((loggedSessionsCount / totalScheduled) * 100) : 100;
+
+      const firstWeekVolume = logs.slice(0, daysInSchedule).reduce((sum, l) => sum + (l.totalVolume || 0), 0);
+      const lastWeekVolume = logs.slice(-daysInSchedule).reduce((sum, l) => sum + (l.totalVolume || 0), 0);
+      const volumeIncrease = firstWeekVolume > 0 ? Math.round(((lastWeekVolume - firstWeekVolume) / firstWeekVolume) * 100) : 0;
+
+      const exerciseStartWeights: Record<string, number> = {};
+      logs.slice(0, daysInSchedule).forEach(log => {
+        log.exercises.forEach(ex => {
+          if (ex.exercise && ex.sets.length > 0) {
+            const name = ex.exercise.name;
+            const maxWeight = Math.max(...ex.sets.map(s => s.weight || 0));
+            if (maxWeight > 0) {
+              exerciseStartWeights[name] = Math.max(exerciseStartWeights[name] || 0, maxWeight);
+            }
+          }
+        });
+      });
+
+      const exerciseEndWeights: Record<string, number> = {};
+      logs.slice(-daysInSchedule).forEach(log => {
+        log.exercises.forEach(ex => {
+          if (ex.exercise && ex.sets.length > 0) {
+            const name = ex.exercise.name;
+            const maxWeight = Math.max(...ex.sets.map(s => s.weight || 0));
+            if (maxWeight > 0) {
+              exerciseEndWeights[name] = Math.max(exerciseEndWeights[name] || 0, maxWeight);
+            }
+          }
+        });
+      });
+
+      const strengthProgress: any[] = [];
+      Object.keys(exerciseStartWeights).forEach(name => {
+        if (exerciseEndWeights[name]) {
+          const startW = exerciseStartWeights[name];
+          const endW = exerciseEndWeights[name];
+          const diff = endW - startW;
+          const pct = startW > 0 ? Math.round((diff / startW) * 100) : 0;
+          strengthProgress.push({
+            exerciseName: name,
+            startWeight: startW,
+            endWeight: endW,
+            percentage: pct,
+          });
+        }
+      });
+
+      activeRoutine.comparisonReport = {
+        adherence: Math.min(100, adherence),
+        loggedSessionsCount,
+        totalScheduled,
+        firstWeekVolume,
+        lastWeekVolume,
+        volumeIncrease,
+        strengthProgress,
+      };
+    } catch (e) {
+      console.error('Error calculating comparison report:', e);
+      activeRoutine.comparisonReport = null;
+    }
+
+    // 3. Mark active routine as completed
     activeRoutine.status = 'completed';
     await this.routineRepo.save(activeRoutine);
 
@@ -255,22 +439,28 @@ export class CoachService {
       targetMacrocycleGoal = nextMacrocycle.goal;
     }
 
-    // 4. Generate new routine schedule
-    const schedule = await this.generateSchedule(dto.splitPreference, dto.useCalisthenics || false);
-
-    // Get user level for description
+    // 4. Get user level and gender
     const user = await this.userRepo.findOne({ where: { id: uId }});
     const level = user?.experienceLevel || 'intermediate';
 
-    // 5. Create new routine
+    // 5. Generate new routine schedule
+    const schedule = await this.generateSchedule(dto.splitPreference, user?.gender || 'neutral', level, dto.useCalisthenics || false);
+
+    // Disclaimer if gender differences applied
+    const extraDesc = user?.gender === 'female' || user?.gender === 'male' 
+      ? ` (Nota: Énfasis aplicado según tendencias estadísticas de género. Ajusta a tus prioridades).` 
+      : '';
+
+    // 6. Create new routine
     const routineEnd = new Date(today);
-    routineEnd.setDate(today.getDate() + 42); // 6 weeks from today
+    const durationDays = this.getRoutineDurationDays(level);
+    routineEnd.setDate(today.getDate() + durationDays);
 
     const newRoutine = this.routineRepo.create({
       userId: uId,
       macrocycleId: targetMacrocycleId,
       name: `Mesociclo Evolucionado - ${dto.splitPreference}`,
-      description: `Generado para nivel ${level}, objetivo: ${targetMacrocycleGoal}`,
+      description: `Generado para nivel ${level}, objetivo: ${targetMacrocycleGoal}${extraDesc}`,
       startDate: today.toISOString().split('T')[0],
       endDate: routineEnd.toISOString().split('T')[0],
       status: 'active',
@@ -286,14 +476,14 @@ export class CoachService {
     let ex = await this.exerciseRepo.findOne({ where: { name } });
     if (!ex) {
       // Asignar un SVG genérico por defecto basado en el grupo muscular para que no dé error en el frontend
-      let defaultSvg = '/assets/icons/exercises/default.svg';
+      let defaultSvg = '/assets/exercises/default.svg';
       const mg = muscleGroup.toLowerCase();
-      if (mg.includes('pecho')) defaultSvg = 'https://www.svgrepo.com/show/305260/chest.svg';
-      if (mg.includes('espalda') || mg.includes('dorsal')) defaultSvg = 'https://www.svgrepo.com/show/305261/back.svg';
-      if (mg.includes('pierna') || mg.includes('cuádriceps') || mg.includes('femoral')) defaultSvg = 'https://www.svgrepo.com/show/305264/leg.svg';
-      if (mg.includes('glúteo')) defaultSvg = 'https://www.svgrepo.com/show/305264/leg.svg';
-      if (mg.includes('brazo') || mg.includes('bíceps') || mg.includes('tríceps')) defaultSvg = 'https://www.svgrepo.com/show/305259/arm.svg';
-      if (mg.includes('hombro')) defaultSvg = 'https://www.svgrepo.com/show/305259/arm.svg';
+      if (mg.includes('pecho')) defaultSvg = 'https://www.svgrepo.com/vectors/305260/chest.svg';
+      if (mg.includes('espalda') || mg.includes('dorsal')) defaultSvg = 'https://www.svgrepo.com/vectors/305261/back.svg';
+      if (mg.includes('pierna') || mg.includes('cuádriceps') || mg.includes('femoral')) defaultSvg = 'https://www.svgrepo.com/vectors/305264/leg.svg';
+      if (mg.includes('glúteo')) defaultSvg = 'https://www.svgrepo.com/vectors/305264/leg.svg';
+      if (mg.includes('brazo') || mg.includes('bíceps') || mg.includes('tríceps')) defaultSvg = 'https://www.svgrepo.com/vectors/305259/arm.svg';
+      if (mg.includes('hombro')) defaultSvg = 'https://www.svgrepo.com/vectors/305259/arm.svg';
 
       ex = this.exerciseRepo.create({ name, muscleGroup, svgUrl: defaultSvg });
       await this.exerciseRepo.save(ex);
@@ -301,8 +491,9 @@ export class CoachService {
     return ex.id;
   }
 
-  private async generateSchedule(splitPref: string, useCalisthenics: boolean): Promise<any[]> {
+  private async generateSchedule(splitPref: string, gender: string, experienceLevel: string, useCalisthenics: boolean): Promise<any[]> {
     const schedule: any[] = [];
+    const isFemale = gender === 'female';
     
     if (splitPref.toLowerCase().includes('upper') || splitPref.toLowerCase().includes('superior')) {
       // UPPER / LOWER (4 days)
@@ -315,60 +506,63 @@ export class CoachService {
       schedule.push({
         dayName: 'Día 1 - Tren Superior',
         exercises: [
-          { exerciseId: u1Ex1.toString(), sets: 3, reps: '8-10' },
-          { exerciseId: u1Ex2.toString(), sets: 3, reps: '8-10' },
-          { exerciseId: u1Ex3.toString(), sets: 3, reps: '10-12' },
-          { exerciseId: u1Ex4.toString(), sets: 3, reps: '12-15' },
-          { exerciseId: u1Ex5.toString(), sets: 3, reps: '12-15' },
+          { exerciseId: u1Ex1.toString(), sets: this.getExerciseSets('u1Ex1', gender, experienceLevel), reps: '8-10' },
+          { exerciseId: u1Ex2.toString(), sets: this.getExerciseSets('u1Ex2', gender, experienceLevel), reps: '8-10' },
+          { exerciseId: u1Ex3.toString(), sets: this.getExerciseSets('u1Ex3', gender, experienceLevel), reps: '10-12' },
+          { exerciseId: u1Ex4.toString(), sets: this.getExerciseSets('u1Ex4', gender, experienceLevel), reps: '12-15' },
+          { exerciseId: u1Ex5.toString(), sets: this.getExerciseSets('u1Ex5', gender, experienceLevel), reps: '12-15' },
         ]
       });
 
+      // Female priority on lower 1: Hip thrust instead of RDL as main
       const l1Ex1 = await this.getOrCreateExercise(useCalisthenics ? 'Sentadilla Pistol (Asistida)' : 'Sentadilla', 'Cuádriceps');
-      const l1Ex2 = await this.getOrCreateExercise(useCalisthenics ? 'Puente de Glúteo a 1 pierna' : 'Peso Muerto Rumano', 'Femorales');
+      const l1Ex2 = await this.getOrCreateExercise(isFemale ? 'Hip Thrust Pesado' : (useCalisthenics ? 'Puente de Glúteo a 1 pierna' : 'Peso Muerto Rumano'), isFemale ? 'Glúteos' : 'Femorales');
       const l1Ex3 = await this.getOrCreateExercise(useCalisthenics ? 'Sentadilla con Salto' : 'Prensa', 'Cuádriceps');
-      const l1Ex4 = await this.getOrCreateExercise(useCalisthenics ? 'Curl Nórdico (Asistido)' : 'Curl Femoral', 'Femorales');
+      const l1Ex4 = await this.getOrCreateExercise(isFemale ? 'Abducción de Cadera (Máquina o Banda)' : (useCalisthenics ? 'Curl Nórdico (Asistido)' : 'Curl Femoral'), isFemale ? 'Glúteos' : 'Femorales');
       const l1Ex5 = await this.getOrCreateExercise(useCalisthenics ? 'Elevación de Gemelos a 1 pierna' : 'Elevación de Gemelos', 'Piernas');
 
       schedule.push({
         dayName: 'Día 2 - Tren Inferior',
         exercises: [
-          { exerciseId: l1Ex1.toString(), sets: 3, reps: '6-8' },
-          { exerciseId: l1Ex2.toString(), sets: 3, reps: '8-10' },
-          { exerciseId: l1Ex3.toString(), sets: 3, reps: '10-12' },
-          { exerciseId: l1Ex4.toString(), sets: 3, reps: '12-15' },
-          { exerciseId: l1Ex5.toString(), sets: 4, reps: '15-20' },
+          { exerciseId: l1Ex1.toString(), sets: this.getExerciseSets('l1Ex1', gender, experienceLevel), reps: '6-8' },
+          { exerciseId: l1Ex2.toString(), sets: this.getExerciseSets('l1Ex2', gender, experienceLevel), reps: '8-10' },
+          { exerciseId: l1Ex3.toString(), sets: this.getExerciseSets('l1Ex3', gender, experienceLevel), reps: '10-12' },
+          { exerciseId: l1Ex4.toString(), sets: this.getExerciseSets('l1Ex4', gender, experienceLevel), reps: '12-15' },
+          { exerciseId: l1Ex5.toString(), sets: this.getExerciseSets('l1Ex5', gender, experienceLevel), reps: '15-20' },
         ]
       });
 
       const u2Ex1 = await this.getOrCreateExercise(useCalisthenics ? 'Dominadas (Pull-ups)' : 'Dominadas / Jalón', 'Espalda');
       const u2Ex2 = await this.getOrCreateExercise(useCalisthenics ? 'Flexiones Declinadas' : 'Press Inclinado', 'Pecho');
       const u2Ex3 = await this.getOrCreateExercise(useCalisthenics ? 'Remo Invertido a 1 mano' : 'Remo en Máquina', 'Espalda');
+      // If female, maybe swap one arm exercise for side delts or just keep it
       const u2Ex4 = await this.getOrCreateExercise(useCalisthenics ? 'Flexiones Diamante' : 'Elevaciones Laterales', 'Hombros');
-      const u2Ex5 = await this.getOrCreateExercise(useCalisthenics ? 'Dominadas Isométricas' : 'Curl Martillo', 'Brazos');
+      const u2Ex5 = await this.getOrCreateExercise(isFemale ? 'Elevaciones Laterales con Cable' : (useCalisthenics ? 'Dominadas Isométricas' : 'Curl Martillo'), isFemale ? 'Hombros' : 'Brazos');
 
       schedule.push({
         dayName: 'Día 3 - Tren Superior',
         exercises: [
-          { exerciseId: u2Ex1.toString(), sets: 3, reps: '8-10' },
-          { exerciseId: u2Ex2.toString(), sets: 3, reps: '8-12' },
-          { exerciseId: u2Ex3.toString(), sets: 3, reps: '10-12' },
-          { exerciseId: u2Ex4.toString(), sets: 4, reps: '15-20' },
-          { exerciseId: u2Ex5.toString(), sets: 3, reps: '10-15' },
+          { exerciseId: u2Ex1.toString(), sets: this.getExerciseSets('u2Ex1', gender, experienceLevel), reps: '8-10' },
+          { exerciseId: u2Ex2.toString(), sets: this.getExerciseSets('u2Ex2', gender, experienceLevel), reps: '8-12' },
+          { exerciseId: u2Ex3.toString(), sets: this.getExerciseSets('u2Ex3', gender, experienceLevel), reps: '10-12' },
+          { exerciseId: u2Ex4.toString(), sets: this.getExerciseSets('u2Ex4', gender, experienceLevel), reps: '15-20' },
+          { exerciseId: u2Ex5.toString(), sets: this.getExerciseSets('u2Ex5', gender, experienceLevel), reps: '10-15' },
         ]
       });
 
-      const l2Ex1 = await this.getOrCreateExercise(useCalisthenics ? 'Sentadilla Búlgara' : 'Peso Muerto Convencional', 'Piernas');
+      // Female priority on lower 2: Bulgarian Split Squats
+      const l2Ex1 = await this.getOrCreateExercise(isFemale ? 'Sentadilla Búlgara' : (useCalisthenics ? 'Sentadilla Búlgara' : 'Peso Muerto Convencional'), isFemale ? 'Piernas/Glúteo' : 'Piernas');
       const l2Ex2 = await this.getOrCreateExercise(useCalisthenics ? 'Hip Thrust a 1 pierna' : 'Hip Thrust', 'Glúteos');
-      const l2Ex3 = await this.getOrCreateExercise(useCalisthenics ? 'Sentadilla Sissy' : 'Extensión de Cuádriceps', 'Cuádriceps');
+      const l2Ex3 = await this.getOrCreateExercise(isFemale ? 'Peso Muerto Rumano con Mancuernas' : (useCalisthenics ? 'Sentadilla Sissy' : 'Extensión de Cuádriceps'), isFemale ? 'Femorales/Glúteo' : 'Cuádriceps');
       const l2Ex4 = await this.getOrCreateExercise('Plancha (Core)', 'Core');
 
       schedule.push({
         dayName: 'Día 4 - Tren Inferior',
         exercises: [
-          { exerciseId: l2Ex1.toString(), sets: 3, reps: '5-8' },
-          { exerciseId: l2Ex2.toString(), sets: 3, reps: '8-12' },
-          { exerciseId: l2Ex3.toString(), sets: 3, reps: '12-15' },
-          { exerciseId: l2Ex4.toString(), sets: 3, reps: '60s' },
+          { exerciseId: l2Ex1.toString(), sets: this.getExerciseSets('l2Ex1', gender, experienceLevel), reps: '5-8' },
+          { exerciseId: l2Ex2.toString(), sets: this.getExerciseSets('l2Ex2', gender, experienceLevel), reps: '8-12' },
+          { exerciseId: l2Ex3.toString(), sets: this.getExerciseSets('l2Ex3', gender, experienceLevel), reps: '12-15' },
+          { exerciseId: l2Ex4.toString(), sets: this.getExerciseSets('l2Ex4', gender, experienceLevel), reps: '60s' },
         ]
       });
 
@@ -377,15 +571,16 @@ export class CoachService {
       const f1Ex1 = await this.getOrCreateExercise(useCalisthenics ? 'Sentadilla Pistol (Asistida)' : 'Sentadilla', 'Cuádriceps');
       const f1Ex2 = await this.getOrCreateExercise(useCalisthenics ? 'Flexiones (Push-ups)' : 'Press Banca', 'Pecho');
       const f1Ex3 = await this.getOrCreateExercise(useCalisthenics ? 'Remo Invertido' : 'Remo con Barra', 'Espalda');
-      const f1Ex4 = await this.getOrCreateExercise(useCalisthenics ? 'Dominadas Supinas (Chin-ups)' : 'Curl de Bíceps', 'Brazos');
+      // If female, swap biceps for glutes
+      const f1Ex4 = await this.getOrCreateExercise(isFemale ? 'Hip Thrust' : (useCalisthenics ? 'Dominadas Supinas (Chin-ups)' : 'Curl de Bíceps'), isFemale ? 'Glúteos' : 'Brazos');
 
       schedule.push({
         dayName: 'Día 1 - Fullbody A',
         exercises: [
-          { exerciseId: f1Ex1.toString(), sets: 3, reps: '6-8' },
-          { exerciseId: f1Ex2.toString(), sets: 3, reps: '8-10' },
-          { exerciseId: f1Ex3.toString(), sets: 3, reps: '8-10' },
-          { exerciseId: f1Ex4.toString(), sets: 3, reps: '12-15' },
+          { exerciseId: f1Ex1.toString(), sets: this.getExerciseSets('f1Ex1', gender, experienceLevel), reps: '6-8' },
+          { exerciseId: f1Ex2.toString(), sets: this.getExerciseSets('f1Ex2', gender, experienceLevel), reps: '8-10' },
+          { exerciseId: f1Ex3.toString(), sets: this.getExerciseSets('f1Ex3', gender, experienceLevel), reps: '8-10' },
+          { exerciseId: f1Ex4.toString(), sets: this.getExerciseSets('f1Ex4', gender, experienceLevel), reps: '12-15' },
         ]
       });
 
@@ -397,14 +592,14 @@ export class CoachService {
       schedule.push({
         dayName: 'Día 2 - Fullbody B',
         exercises: [
-          { exerciseId: f2Ex1.toString(), sets: 3, reps: '8-10' },
-          { exerciseId: f2Ex2.toString(), sets: 3, reps: '8-12' },
-          { exerciseId: f2Ex3.toString(), sets: 3, reps: '8-10' },
-          { exerciseId: f2Ex4.toString(), sets: 3, reps: '12-15' },
+          { exerciseId: f2Ex1.toString(), sets: this.getExerciseSets('f2Ex1', gender, experienceLevel), reps: '8-10' },
+          { exerciseId: f2Ex2.toString(), sets: this.getExerciseSets('f2Ex2', gender, experienceLevel), reps: '8-12' },
+          { exerciseId: f2Ex3.toString(), sets: this.getExerciseSets('f2Ex3', gender, experienceLevel), reps: '8-10' },
+          { exerciseId: f2Ex4.toString(), sets: this.getExerciseSets('f2Ex4', gender, experienceLevel), reps: '12-15' },
         ]
       });
 
-      const f3Ex1 = await this.getOrCreateExercise(useCalisthenics ? 'Sentadilla con Salto' : 'Prensa', 'Cuádriceps');
+      const f3Ex1 = await this.getOrCreateExercise(isFemale ? 'Sentadilla Búlgara' : (useCalisthenics ? 'Sentadilla con Salto' : 'Prensa'), 'Cuádriceps');
       const f3Ex2 = await this.getOrCreateExercise(useCalisthenics ? 'Flexiones Declinadas' : 'Press Inclinado', 'Pecho');
       const f3Ex3 = await this.getOrCreateExercise(useCalisthenics ? 'Hip Thrust a 1 pierna' : 'Hip Thrust', 'Glúteos');
       const f3Ex4 = await this.getOrCreateExercise(useCalisthenics ? 'Plancha (Core)' : 'Elevaciones Laterales', 'Hombros');
@@ -412,14 +607,99 @@ export class CoachService {
       schedule.push({
         dayName: 'Día 3 - Fullbody C',
         exercises: [
-          { exerciseId: f3Ex1.toString(), sets: 3, reps: '10-12' },
-          { exerciseId: f3Ex2.toString(), sets: 3, reps: '10-12' },
-          { exerciseId: f3Ex3.toString(), sets: 3, reps: '10-15' },
-          { exerciseId: f3Ex4.toString(), sets: 4, reps: '15-20' },
+          { exerciseId: f3Ex1.toString(), sets: this.getExerciseSets('f3Ex1', gender, experienceLevel), reps: '10-12' },
+          { exerciseId: f3Ex2.toString(), sets: this.getExerciseSets('f3Ex2', gender, experienceLevel), reps: '10-12' },
+          { exerciseId: f3Ex3.toString(), sets: this.getExerciseSets('f3Ex3', gender, experienceLevel), reps: '10-15' },
+          { exerciseId: f3Ex4.toString(), sets: this.getExerciseSets('f3Ex4', gender, experienceLevel), reps: '15-20' },
         ]
       });
     }
 
     return schedule;
+  }
+
+  private getExerciseSets(key: string, gender: string, level: string): number {
+    const isFemale = gender === 'female';
+    const isBeginner = level === 'beginner';
+
+    let sets = 3; // default
+
+    if (key === 'u1Ex1') sets = isFemale ? 3 : 4;
+    else if (key === 'u1Ex2') sets = isFemale ? 3 : 4;
+    else if (key === 'u1Ex3') sets = 3;
+    else if (key === 'u1Ex4') sets = isFemale ? 3 : 4;
+    else if (key === 'u1Ex5') sets = isFemale ? 3 : 4;
+
+    else if (key === 'l1Ex1') sets = isFemale ? 4 : 3;
+    else if (key === 'l1Ex2') sets = isFemale ? 4 : 3;
+    else if (key === 'l1Ex3') sets = 3;
+    else if (key === 'l1Ex4') sets = isFemale ? 4 : 3;
+    else if (key === 'l1Ex5') sets = 4;
+
+    else if (key === 'u2Ex1') sets = 4;
+    else if (key === 'u2Ex2') sets = isFemale ? 3 : 4;
+    else if (key === 'u2Ex3') sets = isFemale ? 3 : 4;
+    else if (key === 'u2Ex4') sets = isFemale ? 4 : 5;
+    else if (key === 'u2Ex5') sets = isFemale ? 3 : 4;
+
+    else if (key === 'l2Ex1') sets = isFemale ? 4 : 3;
+    else if (key === 'l2Ex2') sets = isFemale ? 4 : 3;
+    else if (key === 'l2Ex3') sets = isFemale ? 4 : 3;
+    else if (key === 'l2Ex4') sets = isFemale ? 3 : 4;
+
+    else if (key === 'f1Ex1') sets = isFemale ? 4 : 3;
+    else if (key === 'f1Ex2') sets = isFemale ? 3 : 4;
+    else if (key === 'f1Ex3') sets = 4;
+    else if (key === 'f1Ex4') sets = 4;
+
+    else if (key === 'f2Ex1') sets = isFemale ? 4 : 3;
+    else if (key === 'f2Ex2') sets = 3;
+    else if (key === 'f2Ex3') sets = 4;
+    else if (key === 'f2Ex4') sets = isFemale ? 3 : 4;
+
+    else if (key === 'f3Ex1') sets = isFemale ? 4 : 3;
+    else if (key === 'f3Ex2') sets = isFemale ? 3 : 4;
+    else if (key === 'f3Ex3') sets = isFemale ? 4 : 3;
+    else if (key === 'f3Ex4') sets = 4;
+
+    if (isBeginner) {
+      if (sets > 3) {
+        sets = 3;
+      } else if (key === 'l1Ex3' || key === 'f3Ex1') {
+        sets = 2; // Menos volumen para novatos
+      }
+    }
+
+    return sets;
+  }
+
+  private getRoutineDurationDays(experienceLevel: string): number {
+    return experienceLevel === 'beginner' ? 35 : 49; // 5 weeks vs 7 weeks
+  }
+
+  private getWeeklyVolumeRange(muscleGroup: string, gender: string): { min: number; max: number } {
+    const mg = muscleGroup.toLowerCase();
+    if (gender === 'female') {
+      if (mg.includes('glúteo')) return { min: 12, max: 16 };
+      if (mg.includes('cuádriceps') || mg.includes('pierna')) return { min: 10, max: 14 };
+      if (mg.includes('femoral')) return { min: 8, max: 12 };
+      if (mg.includes('espalda') || mg.includes('dorsal')) return { min: 10, max: 14 };
+      if (mg.includes('hombro')) return { min: 8, max: 12 };
+      if (mg.includes('pecho')) return { min: 6, max: 10 };
+      if (mg.includes('brazo') || mg.includes('bíceps') || mg.includes('tríceps')) return { min: 6, max: 10 };
+      if (mg.includes('core') || mg.includes('abdomen')) return { min: 6, max: 10 };
+      return { min: 10, max: 20 };
+    } else if (gender === 'male') {
+      if (mg.includes('pecho')) return { min: 10, max: 14 };
+      if (mg.includes('espalda') || mg.includes('dorsal')) return { min: 12, max: 16 };
+      if (mg.includes('hombro')) return { min: 8, max: 12 };
+      if (mg.includes('cuádriceps') || mg.includes('pierna')) return { min: 8, max: 12 };
+      if (mg.includes('femoral') || mg.includes('glúteo')) return { min: 8, max: 12 };
+      if (mg.includes('brazo') || mg.includes('bíceps') || mg.includes('tríceps')) return { min: 8, max: 12 };
+      if (mg.includes('core') || mg.includes('abdomen')) return { min: 4, max: 8 };
+      return { min: 10, max: 20 };
+    } else {
+      return { min: 10, max: 20 };
+    }
   }
 }

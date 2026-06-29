@@ -24,7 +24,7 @@ export class AuthService {
     return this.moduleRef.get(getRepositoryToken(User), { strict: false });
   }
 
-  async register(dto: RegisterDto, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date; weight?: number; height?: number; age?: number } }> {
+  async register(dto: RegisterDto, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date; weight?: number; height?: number; age?: number; gender?: string; experienceLevel?: string; menstrualCycleOptIn?: boolean; lastPeriodStartDate?: string | null; averageCycleLength?: number | null } }> {
     const email = dto.email.toLowerCase();
     
     const existing = await this.userRepo.findOne({ where: { email } });
@@ -75,11 +75,16 @@ export class AuthService {
         weight: saved.weight,
         height: saved.height,
         age: saved.age,
+        gender: saved.gender,
+        experienceLevel: saved.experienceLevel,
+        menstrualCycleOptIn: saved.menstrualCycleOptIn,
+        lastPeriodStartDate: saved.lastPeriodStartDate,
+        averageCycleLength: saved.averageCycleLength,
       },
     };
   }
 
-  async login(dto: LoginDto, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date; weight?: number; height?: number; age?: number } }> {
+  async login(dto: LoginDto, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date; weight?: number; height?: number; age?: number; gender?: string; experienceLevel?: string; menstrualCycleOptIn?: boolean; lastPeriodStartDate?: string | null; averageCycleLength?: number | null } }> {
     const email = dto.email.toLowerCase();
     const dbUser = await this.userRepo.findOne({ where: { email } });
 
@@ -126,11 +131,16 @@ export class AuthService {
         weight: dbUser.weight,
         height: dbUser.height,
         age: dbUser.age,
+        gender: dbUser.gender,
+        experienceLevel: dbUser.experienceLevel,
+        menstrualCycleOptIn: dbUser.menstrualCycleOptIn,
+        lastPeriodStartDate: dbUser.lastPeriodStartDate,
+        averageCycleLength: dbUser.averageCycleLength,
       },
     };
   }
 
-  async refresh(cookieToken: string, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date; weight?: number; height?: number; age?: number } }> {
+  async refresh(cookieToken: string, res: Response): Promise<{ accessToken: string; user: { _id: string; email: string; name: string; createdAt: Date; weight?: number; height?: number; age?: number; gender?: string; experienceLevel?: string; menstrualCycleOptIn?: boolean; lastPeriodStartDate?: string | null; averageCycleLength?: number | null } }> {
     if (!cookieToken) {
       throw new UnauthorizedException('No hay token de refresco disponible');
     }
@@ -178,6 +188,11 @@ export class AuthService {
           weight: dbUser.weight,
           height: dbUser.height,
           age: dbUser.age,
+          gender: dbUser.gender,
+          experienceLevel: dbUser.experienceLevel,
+          menstrualCycleOptIn: dbUser.menstrualCycleOptIn,
+          lastPeriodStartDate: dbUser.lastPeriodStartDate,
+          averageCycleLength: dbUser.averageCycleLength,
         },
       };
 
@@ -186,13 +201,16 @@ export class AuthService {
     }
   }
 
-  async updateProfile(userId: string, data: { weight?: number; height?: number; age?: number }): Promise<any> {
+  async updateProfile(userId: string, data: { weight?: number; height?: number; age?: number; menstrualCycleOptIn?: boolean; lastPeriodStartDate?: string; averageCycleLength?: number }): Promise<any> {
     const user = await this.userRepo.findOne({ where: { id: Number(userId) } });
     if (!user) throw new UnauthorizedException('Usuario no encontrado');
 
     if (data.weight !== undefined) user.weight = data.weight;
     if (data.height !== undefined) user.height = data.height;
     if (data.age !== undefined) user.age = data.age;
+    if (data.menstrualCycleOptIn !== undefined) user.menstrualCycleOptIn = data.menstrualCycleOptIn;
+    if (data.lastPeriodStartDate !== undefined) user.lastPeriodStartDate = data.lastPeriodStartDate;
+    if (data.averageCycleLength !== undefined) user.averageCycleLength = data.averageCycleLength;
 
     await this.userRepo.save(user);
 
@@ -204,6 +222,11 @@ export class AuthService {
       weight: user.weight,
       height: user.height,
       age: user.age,
+      gender: user.gender,
+      experienceLevel: user.experienceLevel,
+      menstrualCycleOptIn: user.menstrualCycleOptIn,
+      lastPeriodStartDate: user.lastPeriodStartDate,
+      averageCycleLength: user.averageCycleLength,
     };
   }
 
